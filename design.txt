@@ -1,0 +1,18 @@
+# comment
+
+# types:
+# int
+# bool
+
+# variable
+let x = 10
+let y = true
+
+# function
+let f = fun (x : int) (y : bool) -> if y then x + 1 else x - 1
+let g = fun () -> if y then 1 else 0
+
+# application
+f x y
+f 24 false
+g ()

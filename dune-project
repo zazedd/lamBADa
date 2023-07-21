@@ -5,15 +5,17 @@
 (generate_opam_files true)
 
 (source
- (github username/reponame))
+ (github zazedd/lamBADa))
 
-(authors "Author Name")
+(authors "Leonardo Santos")
 
-(maintainers "Maintainer Name")
+(maintainers "Leonardo Santos")
 
 (license LICENSE)
 
 (documentation https://url/to/documentation)
+
+(using menhir 2.1)
 
 (package
  (name lambada)

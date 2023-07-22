@@ -26,6 +26,9 @@ rule read =
   | "else" { ELSE }
   | "fun" { FUN }
   | "->" { ARROW }
+  | ":" { COLON }
+  | "int" { TINT }
+  | "bool" { TBOOL }
   | id { ID ( Lexing.lexeme lexbuf ) }
   | int { INT ( Lexing.lexeme lexbuf |> int_of_string ) }
   | eof { EOF }

@@ -13,7 +13,6 @@
 %token MULT
 %token TRUE
 %token FALSE
-%token EOF
 %token LPAREN
 %token RPAREN
 %token LET
@@ -25,6 +24,10 @@
 %token ELSE
 %token FUN
 %token ARROW
+%token COLON
+%token TINT
+%token TBOOL
+%token EOF
 
 %nonassoc IN
 %nonassoc ELSE
@@ -42,12 +45,10 @@ prog:
 
 expr:
   | e = simple_expr { e }
-  | TRUE { Bool true }
-  | FALSE { Bool false }
   | e1 = expr; PLUS; e2 = expr { Bop (Add, e1, e2) }
   | e1 = expr; MULT; e2 = expr { Bop (Mult, e1, e2) }
   | e1 = expr; EQ; e2 = expr { Bop (Eq, e1, e2) }
-  | LET; name = ID; EQUALS; binding = expr; IN; body = expr { Let (name, binding, body) }
+  | LET; name = ID; COLON; t = typ; EQUALS; binding = expr; IN; body = expr { Let (name, t, binding, body) }
   | IF; b = expr ; THEN; e1 = expr; ELSE; e2 = expr { If (b, e1, e2) }
   | e = simple_expr; es = simple_expr+ { make_apply e es }
   | FUN; var = ID ; ARROW; e = expr; { AnonFun (var, e) }
@@ -56,5 +57,11 @@ expr:
 simple_expr:
   | i = INT { Int i }
   | x = ID { Var x }
+  | TRUE { Bool true }
+  | FALSE { Bool false }
   | LPAREN; e = expr; RPAREN { e }
 ;
+
+typ:
+  | TINT { TInt }
+  | TBOOL { TBool }

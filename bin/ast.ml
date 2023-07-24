@@ -1,5 +1,5 @@
 type bop = Add | Mult | Eq
-type typ = TInt | TBool
+type typ = TInt | TBool | TGen | TArrow of typ * typ
 
 type expr =
   | Int of int

@@ -6,9 +6,11 @@ and value = VInt of int | VBool of bool | Closure of string * expr * ctx
 
 exception RuntimeError of string
 
+let is_value = function VInt _ | VBool _ -> true | _ -> false
+
 let string_of_val = function
-  | VInt i -> "- : int = " ^ string_of_int i
-  | VBool b -> "- : bool = " ^ string_of_bool b
+  | VInt i -> string_of_int i
+  | VBool b -> string_of_bool b
   | Closure _ -> failwith "Not a value"
 
 let rec eval ctx = function

@@ -16,11 +16,14 @@ let new_var () =
   last_id := !last_id + 1;
   newv
 
-let rec instance = function TVar { def = Some t; _ } -> instance t | t -> t
+(* any variable coming out this function is TVar { def = None; _}, keep that in mind *)
+let rec instanciate = function
+  | TVar { def = Some t; _ } -> instanciate t
+  | t -> t
 
 let rec free_vars t =
-  match instance t with
-  | TVar ({ def = None; _ } as v) -> [ v ]
+  match instanciate t with
+  | TVar v -> [ v ]
   | TArrow (t1, t2) ->
       let l1 : tvar list = free_vars t1 in
       let l2 : tvar list = free_vars t2 in
@@ -34,7 +37,7 @@ let lookup ctx name =
     let _, t = List.find (fun (ss, _) -> ss = name) (fst ctx) in
     let s = List.fold_left (fun acc a -> (a, new_var ()) :: acc) [] (snd ctx) in
     let rec subst t =
-      match instance t with
+      match instanciate t with
       | TVar x as t -> (
           try List.find (fun (v, _) -> x = v) s |> snd with Not_found -> t)
       | TArrow (t1, t2) -> TArrow (subst t1, subst t2)
@@ -44,19 +47,20 @@ let lookup ctx name =
   with Not_found -> failwith (Format.sprintf "Unbound variable %s" name)
 
 let rec unify t1 t2 =
-  match (instance t1, instance t2) with
+  match (instanciate t1, instanciate t2) with
   | TVar { id = id1; _ }, TVar { id = id2; _ } when id1 = id2 -> ()
   | TArrow (t11, t12), TArrow (t21, t22) ->
       unify t11 t21;
       unify t12 t22
-  | TVar ({ def = None; _ } as v), t -> v.def <- Some t
-  | t, TVar ({ def = None; _ } as v) -> v.def <- Some t
+  | TVar v, t -> v.def <- Some t
+  | t, TVar v -> v.def <- Some t
+  | t1, t2 when t1 = t2 -> ()
   | t1, t2 ->
       failwith
         (Format.sprintf "Cant unify %s with %s." (string_of_typ t1)
            (string_of_typ t2))
 
-let extend ctx name t = ((name, instance t) :: fst ctx, free_vars t @ snd ctx)
+let extend ctx name t = ((name, instanciate t) :: fst ctx, free_vars t @ snd ctx)
 
 let rec typeof ctx = function
   | Int _ -> (TInt, ctx)
@@ -70,23 +74,52 @@ let rec typeof ctx = function
   | App (e1, e2) -> typeof_app ctx e1 e2
 
 and typeof_if ctx e1 e2 e3 =
-  match typeof ctx e1 |> fst |> instance with
-  | TBool -> if_guard ctx e2 e3
-  | TVar ({ def = None; _ } as v) ->
+  match typeof ctx e1 |> fst |> instanciate with
+  | TBool -> if_branch ctx e2 e3
+  | TVar v ->
       let _ = v.def <- Some TBool in
-      if_guard ctx e2 e3
+      if_branch ctx e2 e3
   | _ -> TypeError "If guard must be a boolean" |> raise
 
-and if_guard ctx e2 e3 =
-  match typeof ctx e2 |> fst with
-  | t when t = (typeof ctx e3 |> fst) -> (t, ctx)
+and if_branch ctx e2 e3 =
+  match (typeof ctx e2 |> fst, typeof ctx e3 |> fst) with
+  | TVar v, t ->
+      let _ = v.def <- Some t in
+      (t, ctx)
+  | t, TVar v ->
+      let _ = v.def <- Some t in
+      (t, ctx)
+  | t1, t2 when t1 = t2 -> (t1, ctx)
   | _ -> TypeError "Both if branches must be the same type" |> raise
 
 and typeof_bop ctx op e1 e2 =
-  match (op, typeof ctx e1 |> fst, typeof ctx e2 |> fst) with
-  | Add, TInt, TInt -> (TInt, ctx)
-  | Mult, TInt, TInt -> (TInt, ctx)
+  match
+    ( op,
+      typeof ctx e1 |> fst |> instanciate,
+      typeof ctx e2 |> fst |> instanciate )
+  with
+  | Add, TInt, TInt | Mult, TInt, TInt -> (TInt, ctx)
   | Eq, TInt, TInt -> (TBool, ctx)
+  | Eq, TVar v, TInt ->
+      let () = v.def <- Some TInt in
+      (TBool, ctx)
+  | Eq, TInt, TVar v ->
+      let () = v.def <- Some TInt in
+      (TBool, ctx)
+  | Eq, TVar v1, TVar v2 ->
+      let () = v1.def <- Some TInt in
+      let () = v2.def <- Some TInt in
+      (TBool, ctx)
+  | _, TVar v, TInt ->
+      let () = v.def <- Some TInt in
+      (TInt, ctx)
+  | _, TInt, TVar v ->
+      let () = v.def <- Some TInt in
+      (TInt, ctx)
+  | _, TVar v1, TVar v2 ->
+      let () = v1.def <- Some TInt in
+      let () = v2.def <- Some TInt in
+      (TInt, ctx)
   | _ -> TypeError "Operator requires the same type on both sides" |> raise
 
 and typeof_let ctx name t e =
@@ -111,7 +144,7 @@ and typeof_app ctx e1 e2 =
   let t2 = typeof ctx e2 |> fst in
   let t = new_var () in
   unify t1 (TArrow (t2, t));
-  (instance t, ctx)
+  (instanciate t, ctx)
 
 let typechecker ctx e =
   let e', res_t_ctx = typeof ctx e in

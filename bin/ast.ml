@@ -1,5 +1,7 @@
 type bop = Add | Mult | Eq
-type typ = TInt | TBool | TGen | TArrow of typ * typ
+
+type typ = TInt | TBool | TVar of tvar | TArrow of typ * typ
+and tvar = { id : int; mutable def : typ option }
 
 type expr =
   | Int of int

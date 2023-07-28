@@ -3,47 +3,84 @@ open Ast
 exception TypeError of string
 
 let rec string_of_typ = function
-  | TInt -> "int"
-  | TBool -> "bool"
-  | TGen -> "a'"
+  | TInt | TVar { def = Some TInt; _ } -> "int"
+  | TBool | TVar { def = Some TBool; _ } -> "bool"
+  | TVar { id; _ } -> Format.sprintf "%c" (Char.chr (id + Char.code 'a'))
   | TArrow (t1, t2) -> string_of_typ t1 ^ " -> " ^ string_of_typ t2
 
-let lookup ctx e =
-  match List.assoc_opt e ctx with
-  | Some t -> t
-  | None -> TypeError "Unbound variable" |> raise
+let last_id = ref 0
+let next_general_name = ref "a"
 
-let extend ctx name t = (name, t) :: ctx
+let new_var () =
+  let newv = TVar { id = !last_id; def = None } in
+  last_id := !last_id + 1;
+  newv
 
-let rec contains_int_bop = function
-  | Int _ | Bool _ | Var _ -> false
-  | Bop (bop, _, _) -> ( match bop with Add | Mult -> true | _ -> false)
-  | Let (_, _, e) -> contains_int_bop e
-  | If (_, e1, e2) -> contains_int_bop e1 || contains_int_bop e2
-  | AnonFun (_, e) -> contains_int_bop e
-  | App (_, e) -> contains_int_bop e
-  | LetIn _ -> assert false
+let rec instance = function TVar { def = Some t; _ } -> instance t | t -> t
 
-let rec contains_bool_bop = function
-  | Int _ | Bool _ | Var _ -> false
-  | Bop (bop, _, _) -> ( match bop with Eq -> true | _ -> false)
-  | Let (_, _, e) -> contains_bool_bop e
-  | If (_, e1, e2) -> contains_bool_bop e1 || contains_bool_bop e2
-  | AnonFun (_, e) -> contains_bool_bop e
-  | App (_, e) -> contains_bool_bop e
-  | LetIn _ -> assert false
+let rec free_vars t =
+  match instance t with
+  | TVar ({ def = None; _ } as v) -> [ v ]
+  | TArrow (t1, t2) ->
+      let l1 : tvar list = free_vars t1 in
+      let l2 : tvar list = free_vars t2 in
+      List.fold_left
+        (fun acc a -> if List.mem a acc then acc else a :: acc)
+        l2 l1
+  | _ -> []
+
+let lookup ctx name =
+  try
+    let _, t = List.find (fun (ss, _) -> ss = name) (fst ctx) in
+    let s = List.fold_left (fun acc a -> (a, new_var ()) :: acc) [] (snd ctx) in
+    let rec subst t =
+      match instance t with
+      | TVar x as t -> (
+          try List.find (fun (v, _) -> x = v) s |> snd with Not_found -> t)
+      | TArrow (t1, t2) -> TArrow (subst t1, subst t2)
+      | t -> t
+    in
+    subst t
+  with Not_found -> failwith (Format.sprintf "Unbound variable %s" name)
+
+let rec unify t1 t2 =
+  match (instance t1, instance t2) with
+  | TVar { id = id1; _ }, TVar { id = id2; _ } when id1 = id2 -> ()
+  | TArrow (t11, t12), TArrow (t21, t22) ->
+      unify t11 t21;
+      unify t12 t22
+  | TVar ({ def = None; _ } as v), t -> v.def <- Some t
+  | t, TVar ({ def = None; _ } as v) -> v.def <- Some t
+  | t1, t2 ->
+      failwith
+        (Format.sprintf "Cant unify %s with %s." (string_of_typ t1)
+           (string_of_typ t2))
+
+let extend ctx name t = ((name, instance t) :: fst ctx, free_vars t @ snd ctx)
 
 let rec typeof ctx = function
   | Int _ -> (TInt, ctx)
   | Bool _ -> (TBool, ctx)
-  | Var v -> (lookup ctx v, ctx)
+  | Var name -> (lookup ctx name, ctx)
+  | If (e1, e2, e3) -> typeof_if ctx e1 e2 e3
   | Bop (op, e1, e2) -> typeof_bop ctx op e1 e2
   | Let (name, t, e) -> typeof_let ctx name t e
   | LetIn (name, t, e1, e2) -> typeof_letin ctx name t e1 e2
-  | If (e1, e2, e3) -> typeof_if ctx e1 e2 e3
-  (* NOT COMPLETE I KNOW THIS IS DUMB *)
-  | AnonFun (name, e) -> typeof_anonfun ctx name e
-  | App (_, e) -> typeof ctx e
+  | AnonFun (v, e) -> typeof_anonfun ctx v e
+  | App (e1, e2) -> typeof_app ctx e1 e2
+
+and typeof_if ctx e1 e2 e3 =
+  match typeof ctx e1 |> fst |> instance with
+  | TBool -> if_guard ctx e2 e3
+  | TVar ({ def = None; _ } as v) ->
+      let _ = v.def <- Some TBool in
+      if_guard ctx e2 e3
+  | _ -> TypeError "If guard must be a boolean" |> raise
+
+and if_guard ctx e2 e3 =
+  match typeof ctx e2 |> fst with
+  | t when t = (typeof ctx e3 |> fst) -> (t, ctx)
+  | _ -> TypeError "Both if branches must be the same type" |> raise
 
 and typeof_bop ctx op e1 e2 =
   match (op, typeof ctx e1 |> fst, typeof ctx e2 |> fst) with
@@ -58,36 +95,23 @@ and typeof_let ctx name t e =
   else TypeError "Definition does not match type" |> raise
 
 and typeof_letin ctx name t e1 e2 =
-  let t' = typeof ctx e1 |> fst in
-  if t = t' then
-    let ctx' = extend ctx name t' in
+  let t1 = typeof ctx e1 |> fst in
+  if t <> t1 then TypeError "Types in let expression do not match" |> raise
+  else
+    let ctx' = extend ctx name t1 in
     typeof ctx' e2
-  else TypeError "Definition does not match type" |> raise
 
-and typeof_if ctx e1 e2 e3 =
-  match typeof ctx e1 |> fst with
-  | TBool | TGen -> (
-      match typeof ctx e2 with
-      | t when t = typeof ctx e3 -> t
-      | _ -> TypeError "Both if branches must be the same type" |> raise)
-  | _ -> TypeError "If guard must be a boolean" |> raise
+and typeof_anonfun ctx v e =
+  let t = new_var () in
+  let ctx' = ((v, t) :: fst ctx, snd ctx) in
+  (TArrow (t, typeof ctx' e |> fst), ctx')
 
-(* we return ctx and not ctx' because we dont care about the variables defined inside lambda functions *)
-(* this is a really stupid way of doing type inference lmao ill fix later *)
-and typeof_anonfun ctx name e =
-  let is_result_int =
-    contains_int_bop e || (fun a -> match a with Int _ -> true | _ -> false) e
-  in
-  let is_result_bool =
-    contains_bool_bop e
-    || (fun a -> match a with Bool _ -> true | _ -> false) e
-  in
-  let res =
-    if is_result_int then TInt else if is_result_bool then TBool else TGen
-  in
-  let ctx' = extend ctx name res in
-  let res_body = typeof ctx' e |> fst in
-  (TArrow (res, res_body), ctx)
+and typeof_app ctx e1 e2 =
+  let t1 = typeof ctx e1 |> fst in
+  let t2 = typeof ctx e2 |> fst in
+  let t = new_var () in
+  unify t1 (TArrow (t2, t));
+  (instance t, ctx)
 
 let typechecker ctx e =
   let e', res_t_ctx = typeof ctx e in

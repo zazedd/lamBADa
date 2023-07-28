@@ -18,4 +18,4 @@ let rec interp ctx t_ctx =
     interp res_ctx res_t_ctx
   with End_of_file -> exit 0
 
-let () = interp Ctx.empty []
+let () = interp Ctx.empty ([], [])

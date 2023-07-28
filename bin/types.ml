@@ -9,7 +9,7 @@ let rec string_of_typ = function
   | TArrow (t1, t2) -> string_of_typ t1 ^ " -> " ^ string_of_typ t2
 
 let last_id = ref 0
-let next_general_name = ref "a"
+(* let next_general_name = ref "a" *)
 
 let new_var () =
   let newv = TVar { id = !last_id; def = None } in
